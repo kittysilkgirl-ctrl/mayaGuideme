@@ -1,26 +1,8 @@
-*.class
 .gradle/
 build/
+app/build/
+local.properties
 *.iml
 .idea/
-local.properties
-.DS_Store
-EOF~
-[200~echo "# mayaGuideme" > README.md
-cat << 'EOF' > .gitignore
-*.class
-.gradle/
-build/
-*.iml
-.idea/
-local.properties
-.DS_Store
-[200~echo "# mayaGuideme" > README.md
-cat << 'EOF' > .gitignore
-*.class
-.gradle/
-build/
-*.iml
-.idea/
-local.properties
-.DS_Store
+*.apk
+*.aab
