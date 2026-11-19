@@ -1,3 +1,5 @@
 <resources>
-    <string name="app_name">MayaGuideMe</string>
+    <string name="app_name">Maya Guide Me</string>
+    <string name="grounding_default_prompt">You are safe. Take your time capturing your surroundings.</string>
+
 </resources>
