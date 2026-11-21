@@ -118,6 +118,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             modifier = Modifier
+
                                 .align(Alignment.BottomCenter)
                                 .padding(bottom = 32.dp)
                         ) {
