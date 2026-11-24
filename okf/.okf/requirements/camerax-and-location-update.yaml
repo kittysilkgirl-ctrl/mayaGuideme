@@ -1,0 +1,188 @@
+okf_version: "0.1"
+type: "requirement"
+id: "camerax-and-location-update"
+project: "mayaGuideme"
+status: "approved"
+updated_at: "2026-11-24T22:35:00Z"
+
+feature:
+  name: "CameraX and location update"
+  description: >
+    Implement capture of environmental features in front of the phone
+    (such as a road sign) to assist with determining and updating location
+    on the OSMDroid map.
+
+context:
+  application_state: "running"
+  role: "application user"
+
+scenarios:
+  - number: 1
+    id: "shows-location-capture-camera-frame"
+    name: "Shows Location capture Camera frame"
+    given:
+      - "The user has opened the application and accepted telemetry consent"
+    when:
+      - "The user presses the 'Find Me' call to action"
+    then:
+      - "A frame displaying the live camera view becomes visible"
+      - "A 'camera take picture' call to action becomes visible"
+
+  - number: 2
+    id: "capture-a-feature-with-a-picture"
+    name: "Capture a feature with a picture"
+    given:
+      - "The photo frame with the live camera view is open"
+    when:
+      - "The user presses the 'camera take picture' call to action"
+    then:
+      - "The frame with the live camera view disappears"
+      - "It is replaced at the top right with a 100.dp x 100.dp square picture of the captured location feature (replacing the prototype 140.dp x 180.dp Card)"
+      - "The picture is rendered in high-resolution grayscale"
+
+  - number: 3
+    id: "update-map-and-dismiss-picture"
+    name: "Update OSMDroid map location and auto-dismiss picture"
+    given:
+      - "The user has taken the location picture"
+    when:
+      - "The service successfully returns and the application is updated"
+    then:
+      - "A loading spinner in the Maya brand colours is displayed while communicating with the edge service"
+      - "Once the response returns, the loading spinner disappears"
+      - "The OSMDroid map updates and shows a custom Canvas 'X' marker (#E91E63) at the user's current location"
+      - "Any resolved street address is displayed (or hidden if empty)"
+      - "The secondary readout displays the three-word designation when enabled and resolved, or falls back to the resolved latitude and longitude"
+      - "The top-right picture disappears"
+
+  - number: 4
+    id: "permissions-denied-on-find-me"
+    name: "Permissions denied when pressing Find Me"
+    type: "negative"
+    given:
+      - "The user has opened the application"
+      - "Required camera or location permissions have not been granted"
+    when:
+      - "The user presses the 'Find Me' call to action"
+      - "The permissions dialog is presented and the user does not grant permission"
+    then:
+      - "A message saying 'you havent granted permission' is displayed"
+      - "The frame with the live camera view does not appear"
+
+  - number: 5
+    id: "capture-malfunction-or-failed-capture"
+    name: "Capture malfunction or failed capture"
+    type: "negative"
+    given:
+      - "The photo frame with the live camera view is open"
+    when:
+      - "The user presses the 'camera take picture' call to action"
+      - "The camera malfunctions or the capture fails"
+    then:
+      - "A dialog is displayed with the message 'Something went wrong, please try again'"
+      - "The dialog contains an 'OK' button"
+      - "Pressing the 'OK' button dismisses the dialog and removes any displayed top-right picture"
+
+  - number: 6
+    id: "free-tier-quota-exhausted-rate-limited"
+    name: "Edge service returns rate-limit / free-tier quota exhausted"
+    type: "negative"
+    given:
+      - "The user has captured a picture without supplying their own Gemini API key (or their key hit quota)"
+      - "The edge service returns HTTP 429 with error_code GEMINI_QUOTA_EXCEEDED"
+    when:
+      - "The client receives the rate-limited response"
+    then:
+      - "The loading spinner disappears and UI interactions unlock"
+      - "Any displayed top-right thumbnail is removed"
+      - "A dedicated quota dialog informs the user that the shared free daily limit has been reached, provides a clickable link to Google AI Studio (https://aistudio.google.com/apikey) to generate their own free API key, and offers options to either enter a key now or dismiss and try again tomorrow"
+
+implementation_expectations:
+  location_resolution:
+    map_sdk: "OSMDroid (org.osmdroid:osmdroid-android:6.1.20) with custom Canvas 'X' marker styled in Maya brand primary (#E91E63)"
+    mode: "event-driven-on-capture"
+    continuous_background_gps: false
+    marker_persistence: "Retains 'X' marker at resolved coordinates until a subsequent capture updates it"
+    map_update_timing: "Update map with 'X' marker once the edge service response has returned and been displayed"
+  address_and_what3words:
+    mode: "best-effort-with-coordinate-fallback"
+    street_address: "Returned alongside resolved coordinates when matched; hidden when empty/null and omission never fails the location update"
+    secondary_readout_slot:
+      primary: "Best-effort ///word.word.word designation when what3words BYOK is enabled, key is configured, and lookup succeeds"
+      fallback: "Resolved latitude and longitude (e.g. '51.75200, -1.25770') returned by the edge service whenever what3words is disabled, unconfigured, or returns null"
+      before_first_resolution: "Hidden until the first edge response returns resolved coordinates"
+  loading_indicator:
+    type: "spinner"
+    theme: "Maya brand colours (res/values/colors.xml)"
+    visibility: "Shown from edge service dispatch until the response returns or an error is raised"
+    interaction_lock: "Disables standard non-emergency controls and gestures (including 'Find Me' and settings) while visible until the edge service responds or an error is raised; Panic / Send-a-Friend remains exempt and immediately preempts this flow once consent is granted"
+  image_processing:
+    ui_thumbnail:
+      placement: "top-right"
+      size_dp: "100.dp x 100.dp"
+      replaces_existing_card: "Replaces the prototype 140.dp x 180.dp floating landmark Card in MainActivity with a 100.dp square grayscale thumbnail."
+      format: "high-resolution grayscale"
+      dismiss_condition: "Disappears once the edge service response has returned and the map has updated, or when dismissing a capture/resolution error dialog"
+    edge_payload:
+      target_dimension_px: 768
+      format: "high-resolution grayscale"
+      preprocessing_pipeline:
+        - "1. Apply EXIF orientation rotation from CameraX ImageCapture output so text/signs are upright."
+        - "2. Aspect-preserving downscale so the longest edge equals 768px (using bilinear/bicubic filtering; do not upscale smaller frames)."
+        - "3. Convert RGB to single-channel luminance grayscale using Rec. 709 luma weights: Y = 0.2126*R + 0.7152*G + 0.0722*B."
+        - "4. Apply a 3x3 high-pass / unsharp-mask convolution kernel (center weight 5, orthogonal neighbors -1, corners 0, clamped to [0, 255]) to accentuate sign lettering, building edges, and architectural contours."
+        - "5. Apply contrast stretch / CLAHE-style local normalization so faded or backlit signage remains legible."
+        - "6. Encode as single-channel grayscale JPEG (quality 85) and base64-encode into image.base64_data with preprocessing tag 'high-pass-grayscale-768'."
+  telemetry_and_edge_service:
+    atomicity: "all-or-nothing-except-unavailable-cellular"
+    atomic_rule: >
+      The 768px high-resolution grayscale image and GPS coordinates must both
+      be present and valid before dispatch; if either fails capture/collection,
+      nothing is sent to the edge service and an error is raised. Mobile network /
+      cell signal telemetry is included when available and is the only payload
+      component that may be omitted when unavailable on the device.
+    gps_collection:
+      provider: "FusedLocationProviderClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cancellationToken)"
+      collection_timeout_ms: 5000
+      max_fix_age_ms: 30000
+      failure_on_null_or_timeout: "Raise capture error dialog; never fall back to stale lastLocation beyond max_fix_age_ms"
+    cellular_collection:
+      api: "TelephonyManager.requestCellInfoUpdate(executor, callback) (API 29+, falling back to allCellInfo on API 26-28)"
+      api_level_guards: "Wrap all CellInfoNr checks and casts inside explicit if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) guards so API 26-28 devices never throw NoClassDefFoundError."
+      scan_timeout_ms: 2000
+      field_mapping:
+        serving_cell: "First CellInfo entry where isRegistered == true, mapped by subtype (API 29+ CellInfoNr -> NR/NCI/PCI/dBm, CellInfoLte -> LTE/ECI/PCI/TAC/dBm/TA, CellInfoWcdma -> WCDMA/CID/PSC/LAC/dBm, CellInfoGsm -> GSM/CID/LAC/dBm/TA)"
+        neighbor_cells: "Remaining non-registered CellInfo entries sorted descending by signal_dbm, capped at 8"
+      on_timeout_or_empty: "Omit cellular telemetry (set cellular: null) and proceed with dispatch if the 768px image and GPS coordinates are valid"
+    no_partial_fallback: "Never update the user's map position from partial or degraded telemetry"
+    required_payload_contents:
+      - "768px high-resolution grayscale image"
+      - "GPS coordinates"
+    optional_when_unavailable_payload_contents:
+      - "mobile network / cell signal telemetry (omitted when unavailable or timed out)"
+    transport: "edge service"
+  failure_handling_and_self_heal:
+    permission_denied_message: "you havent granted permission"
+    self_heal_and_recovery:
+      - "On any failure (camera hardware error, GPS timeout/null, image preprocessing exception, HTTP non-200, or socket timeout), immediately cancel any active coroutines/CameraX use cases, clear the loading spinner, re-enable UI controls, and purge the 100.dp top-right thumbnail from state so stale imagery never persists."
+      - "Preserve the last verified 'X' marker, street address, and secondary coordinate/what3words readout on the map rather than wiping valid prior location state."
+      - "Unbind CameraX preview/capture lifecycles cleanly on background/pause and re-bind deterministically on resume or next 'Find Me' trigger to prevent locked camera hardware sessions."
+    rate_limit_quota_dialog:
+      trigger_error_code: "GEMINI_QUOTA_EXCEEDED"
+      http_status: 429
+      guidance_message: >
+        Shared free daily capacity has been reached. You can get your own free
+        Gemini API key at https://aistudio.google.com/apikey to continue right away,
+        or wait until tomorrow when the shared daily quota resets.
+      key_setup_url: "https://aistudio.google.com/apikey"
+      actions:
+        - "Add API Key (opens BYOK key entry dialog/settings)"
+        - "OK / Try Tomorrow (dismisses dialog and cleans up thumbnail)"
+    capture_error_dialog:
+      message: "Something went wrong, please try again"
+      dismiss_action: "OK"
+      post_dismiss_cleanup: "Removes top-right thumbnail so stale or failed capture imagery cannot display misleading location data"
+      triggers_on:
+        - "Camera capture failure or hardware malfunction"
+        - "Missing or failed GPS or image capture preventing required package assembly"
+        - "Edge service dispatch failure or invalid response (excluding GEMINI_QUOTA_EXCEEDED which uses rate_limit_quota_dialog)"

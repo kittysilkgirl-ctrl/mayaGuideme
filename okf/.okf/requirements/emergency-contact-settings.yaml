@@ -1,0 +1,105 @@
+okf_version: "0.1"
+type: "requirement"
+id: "emergency-contact-settings"
+project: "mayaGuideme"
+status: "approved"
+updated_at: "2026-11-24T22:35:00Z"
+
+feature:
+  name: "Emergency Contact Settings Dialog"
+  description: >
+    Provide a settings dialog where the user can configure their trusted
+    emergency contact either by picking a contact from the device address book
+    using a zero-permission system picker (auto-populating available name,
+    phone/SMS, WhatsApp, and email fields where supported by the OS version)
+    or by manually entering and supplementing missing contact details,
+    persisted locally in Tink-encrypted Jetpack Preferences DataStore.
+
+context:
+  application_state: "running"
+  role: "application user"
+
+scenarios:
+  - number: 1
+    id: "open-emergency-contact-settings-dialog"
+    name: "Open emergency contact settings dialog"
+    given:
+      - "The user is in the application"
+    when:
+      - "The user opens the emergency contact settings action"
+    then:
+      - "A modal settings dialog is displayed showing current emergency contact fields (Display Name, SMS Phone Number, WhatsApp Number, Email Address) and a 'Pick from Contacts' action"
+
+  - number: 2
+    id: "pick-from-contacts-prepopulates-available-fields"
+    name: "Selecting a contact from device contacts prepopulates available fields without requiring READ_CONTACTS"
+    given:
+      - "The emergency contact settings dialog is open"
+    when:
+      - "The user presses 'Pick from Contacts' and selects a contact from the system contact picker"
+    then:
+      - "The contact's display name prepopulates the Display Name field"
+      - "The selected phone number prepopulates the SMS Phone Number field and defaults the WhatsApp Number field"
+      - "On Android 17+ (API 37+), any email address returned by the system Contact Picker Session URI also prepopulates the Email Address field"
+      - "Any field not returned by the picker (such as Email on API < 37) remains editable so the user can type in additional details manually"
+
+  - number: 3
+    id: "manual-entry-and-supplementation-before-save"
+    name: "User enters or edits additional contact details and saves"
+    given:
+      - "The emergency contact settings dialog is open (with or without a contact picked)"
+    when:
+      - "The user types or edits SMS Phone Number, WhatsApp Number, Email Address, or Display Name and presses 'Save'"
+    then:
+      - "The entered contact details are validated and persisted locally in Tink-encrypted Jetpack Preferences DataStore"
+      - "The settings dialog closes and the updated emergency contact is ready for the Send-a-Friend / Panic Alert dispatch"
+
+  - number: 4
+    id: "contacts-picker-cancelled-or-unavailable"
+    name: "Contact picker cancelled or unavailable"
+    type: "negative"
+    given:
+      - "The emergency contact settings dialog is open"
+    when:
+      - "The user cancels the contact picker or no picker activity is available"
+    then:
+      - "The settings dialog remains open with existing values intact"
+      - "The user can still manually type all contact fields and save without requiring address book permission"
+
+implementation_expectations:
+  ui_presentation:
+    component: "Material 3 AlertDialog / modal dialog (Jetpack Compose)"
+    fields:
+      - "Display Name (optional label for the trusted contact)"
+      - "SMS Phone Number (E.164 or local dialable number for SmsManager dispatch)"
+      - "WhatsApp Number / Target (prepopulated from contact mobile number when available; editable or clearable if user only wants SMS/email)"
+      - "Email Address (prepopulated on API 37+ when returned by Contact Picker, or entered manually)"
+    actions:
+      - "Pick from Contacts"
+      - "Save"
+      - "Cancel"
+  contact_picker_integration:
+    permission_model: >
+      Zero upfront READ_CONTACTS permission. Do NOT declare READ_CONTACTS in
+      AndroidManifest.xml or query CommonDataKinds.Phone / CommonDataKinds.Email
+      tables by CONTACT_ID from a raw Contacts URI (which throws SecurityException
+      on Android without READ_CONTACTS).
+    api_37_and_above:
+      intent: "ContactsPickerSessionContract.ACTION_PICK_CONTACTS via ActivityResultContracts.StartActivityForResult()"
+      extras:
+        - "EXTRA_PICK_CONTACTS_REQUESTED_DATA_FIELDS = arrayListOf(CommonDataKinds.Phone.CONTENT_ITEM_TYPE, CommonDataKinds.Email.CONTENT_ITEM_TYPE)"
+      result_handling: "Query returned Session URI immediately inside the ActivityResult callback with null selection/selectionArgs; extract DISPLAY_NAME, phone number (preferring TYPE_MOBILE), and primary email into Compose/ViewModel state."
+      immediate_persist_rule: "Never store, cache, or re-query the temporary Session URI after the ActivityResult callback returns; copy extracted fields to Tink-encrypted DataStore upon Save (and never depend on the URI remaining readable later)."
+    api_below_37:
+      intent: "Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI) via custom ActivityResultContract or StartActivityForResult()"
+      result_handling: "Query the returned Phone data-row URI directly inside the ActivityResult callback (no sub-path traversal, null selection/selectionArgs) to extract DISPLAY_NAME and Phone.NUMBER in a single row with zero permissions; leave Email editable for manual entry and never store or re-query the returned URI later."
+    prepopulation_rules:
+      - "Extract DISPLAY_NAME -> prepopulate Display Name."
+      - "Populate SMS Phone Number and prefill WhatsApp Number from the returned phone number."
+      - "On API 37+, populate Email Address with primary/first email if returned by the Session URI."
+      - "Never overwrite fields with blank strings if the user already entered values and the picker result lacks that specific field."
+      - "All fields remain standard editable OutlinedTextFields after picker return so the user can add missing channels (e.g., adding an email address) or fix formatting."
+  persistence_and_privacy:
+    storage: "Jetpack Preferences DataStore (1.3.0) + Google Tink AEAD (Android Keystore-backed) behind SecurePreferencesStore interface (never deprecated EncryptedSharedPreferences)"
+    zero_server_persistence: "Emergency contact details are stored strictly on-device and never uploaded or logged to any server"
+    channel_readiness: "At least one valid dispatch channel (SMS number, WhatsApp number, or email address) must be populated to enable Save"

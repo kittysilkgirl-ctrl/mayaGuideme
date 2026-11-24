@@ -1,0 +1,195 @@
+okf_version: "0.1"
+type: "requirement"
+id: "edge-service-contract"
+project: "mayaGuideme"
+status: "approved"
+updated_at: "2026-11-22T05:40:00Z"
+
+feature:
+  name: "Edge service JSON wire contract"
+  description: >
+    Define the HTTP endpoint, headers, and JSON request/response schemas
+    between the mayaGuideme Android client and the Cloud Run edge proxy
+    for ephemeral location resolution, including explicit resolved latitude
+    and longitude fields for map placement and fallback coordinate display.
+
+context:
+  application_state: "edge-communication"
+  role: "edge service and Android client"
+
+scenarios:
+  - number: 1
+    id: "valid-atomic-payload-returns-resolved-location"
+    name: "Valid atomic payload resolves location with best-effort enrichments"
+    given:
+      - "The client sends a valid request containing the 768px grayscale image and GPS coordinates"
+      - "Consent header X-Consent-Granted is true"
+    when:
+      - "The edge service processes the request"
+    then:
+      - "The edge service returns HTTP 200 with explicit resolved latitude and longitude, confidence, and formatted coordinate string"
+      - "Optional street_address and what3words fields are populated on a best-effort basis or returned as null"
+      - "When what3words is null or disabled, the client uses the returned resolved latitude and longitude for the secondary location readout"
+      - "No raw photo, GPS fix, cellular data, or API keys are persisted on the server"
+
+  - number: 2
+    id: "missing-cellular-telemetry-still-resolves"
+    name: "Request with omitted cellular telemetry resolves normally"
+    given:
+      - "Cellular telemetry was unavailable or timed out on the device"
+      - "The client sends the request with cellular set to null alongside valid image and GPS fields"
+    when:
+      - "The edge service processes the request"
+    then:
+      - "The edge service accepts the payload and returns HTTP 200 with resolved latitude and longitude"
+
+  - number: 3
+    id: "invalid-payload-or-missing-consent-returns-error"
+    name: "Missing consent or incomplete required fields returns error envelope"
+    type: "negative"
+    given:
+      - "X-Consent-Granted is missing/false or required image/GPS fields are invalid"
+    when:
+      - "The edge service receives the request"
+    then:
+      - "The edge service rejects the request with an HTTP 4xx error JSON envelope"
+      - "The client triggers the capture error dialog and clears any displayed thumbnail"
+
+implementation_expectations:
+  endpoint:
+    method: "POST"
+    path: "/v1/resolve-location"
+    content_type: "application/json"
+    client_timeout_ms: 15000
+  headers:
+    required:
+      - "X-Correlation-ID: <uuid-v4>"
+      - "X-Consent-Granted: true"
+    optional_byok:
+      - "X-Gemini-Api-Key: <user-gemini-key>"
+      - "X-What3Words-Api-Key: <user-what3words-key>"
+  request_schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    title: "ResolveLocationRequest"
+    type: "object"
+    additionalProperties: false
+    required: ["capture_id", "timestamp_utc", "gps", "cellular", "image"]
+    properties:
+      capture_id:
+        type: "string"
+        format: "uuid"
+      timestamp_utc:
+        type: "string"
+        format: "date-time"
+      gps:
+        type: "object"
+        additionalProperties: false
+        required: ["latitude", "longitude", "horizontal_accuracy_m", "fix_age_ms"]
+        properties:
+          latitude: { type: "number", minimum: -90, maximum: 90 }
+          longitude: { type: "number", minimum: -180, maximum: 180 }
+          altitude_m: { type: ["number", "null"] }
+          horizontal_accuracy_m: { type: "number", minimum: 0 }
+          bearing_deg: { type: ["number", "null"], minimum: 0, maximum: 360 }
+          fix_age_ms: { type: "integer", minimum: 0 }
+      cellular:
+        oneOf:
+          - type: "null"
+          - type: "object"
+            additionalProperties: false
+            required: ["serving_cell"]
+            properties:
+              operator_mcc: { type: ["string", "null"], pattern: "^[0-9]{3}$" }
+              operator_mnc: { type: ["string", "null"], pattern: "^[0-9]{2,3}$" }
+              serving_cell: { $ref: "#/$defs/cellTower" }
+              neighbor_cells:
+                type: "array"
+                maxItems: 8
+                items: { $ref: "#/$defs/cellTower" }
+                default: []
+      image:
+        type: "object"
+        additionalProperties: false
+        required: ["mime_type", "width_px", "height_px", "preprocessing", "base64_data"]
+        properties:
+          mime_type: { type: "string", enum: ["image/jpeg", "image/webp"] }
+          width_px: { type: "integer", minimum: 1, maximum: 768 }
+          height_px: { type: "integer", minimum: 1, maximum: 768 }
+          preprocessing: { type: "string", const: "high-pass-grayscale-768" }
+          base64_data: { type: "string", minLength: 1 }
+    $defs:
+      cellTower:
+        type: "object"
+        additionalProperties: false
+        required: ["radio_type", "cell_id", "signal_dbm"]
+        properties:
+          radio_type: { type: "string", enum: ["NR", "LTE", "WCDMA", "GSM"] }
+          mcc: { type: ["string", "null"] }
+          mnc: { type: ["string", "null"] }
+          area_code: { type: ["integer", "null"] }
+          cell_id: { type: "integer" }
+          physical_cell_id: { type: ["integer", "null"] }
+          signal_dbm: { type: "integer", minimum: -156, maximum: -30 }
+          timing_advance: { type: ["integer", "null"] }
+  response_schema_200:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    title: "ResolveLocationResponse"
+    type: "object"
+    additionalProperties: false
+    required:
+      - "capture_id"
+      - "status"
+      - "resolved_location"
+      - "lat_lon_display"
+      - "street_address"
+      - "what3words"
+      - "enrichment_status"
+    properties:
+      capture_id: { type: "string", format: "uuid" }
+      status: { type: "string", const: "ok" }
+      resolved_location:
+        type: "object"
+        additionalProperties: false
+        required: ["latitude", "longitude", "confidence_m", "resolution_source"]
+        properties:
+          latitude: { type: "number", minimum: -90, maximum: 90 }
+          longitude: { type: "number", minimum: -180, maximum: 180 }
+          confidence_m: { type: "number", minimum: 0 }
+          resolution_source:
+            type: "string"
+            enum: ["visual_and_telemetry_fusion", "telemetry_refined", "gps_anchored"]
+          matched_landmark_hint: { type: ["string", "null"] }
+      lat_lon_display:
+        type: "string"
+        pattern: "^-?[0-9]+\\.[0-9]+,\\s*-?[0-9]+\\.[0-9]+$"
+        description: "Pre-formatted resolved latitude, longitude string (e.g., '51.75200, -1.25770') always returned for fallback secondary readout when what3words is null or disabled."
+      street_address: { type: ["string", "null"] }
+      what3words:
+        type: ["string", "null"]
+        pattern: "^///[a-z]+\\.[a-z]+\\.[a-z]+$"
+      enrichment_status:
+        type: "object"
+        additionalProperties: false
+        required: ["address", "what3words"]
+        properties:
+          address: { type: "string", enum: ["resolved", "unavailable", "failed"] }
+          what3words: { type: "string", enum: ["resolved", "disabled_no_key", "invalid_key", "failed"] }
+  error_schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    title: "ResolveLocationError"
+    type: "object"
+    additionalProperties: false
+    required: ["capture_id", "status", "error_code", "retryable"]
+    properties:
+      capture_id: { type: ["string", "null"], format: "uuid" }
+      status: { type: "string", const: "error" }
+      error_code:
+        type: "string"
+        enum:
+          - "CONSENT_REQUIRED"
+          - "INVALID_ATOMIC_PAYLOAD"
+          - "GEMINI_QUOTA_EXCEEDED"
+          - "GEMINI_INVALID_KEY"
+          - "LOCATION_UNRESOLVABLE"
+          - "UPSTREAM_TIMEOUT"
+      retryable: { type: "boolean" }

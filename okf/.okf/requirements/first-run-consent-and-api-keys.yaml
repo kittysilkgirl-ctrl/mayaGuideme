@@ -1,0 +1,107 @@
+okf_version: "0.1"
+type: "requirement"
+id: "first-run-consent-and-api-keys"
+project: "mayaGuideme"
+status: "approved"
+updated_at: "2026-11-24T22:35:00Z"
+
+feature:
+  name: "First-run telemetry consent and optional BYOK API keys"
+  description: >
+    Require explicit user consent on first launch before transmitting mobile
+    network triangulation, GPS coordinates, and location photos to the location
+    service (with zero server-side storage), followed by optional user-supplied
+    API key configuration for Gemini and what3words persisted via Jetpack
+    Preferences DataStore encrypted with Google Tink (Android Keystore-backed).
+
+context:
+  application_state: "first-launch"
+  role: "application user"
+
+scenarios:
+  - number: 1
+    id: "shows-mandatory-telemetry-consent-dialog"
+    name: "Shows mandatory telemetry consent dialog on first run"
+    given:
+      - "The user launches the application for the first time"
+      - "Telemetry consent has not yet been granted"
+    when:
+      - "The application opens"
+    then:
+      - "A mandatory consent dialog is displayed before the application can be used"
+      - "All main-screen controls including Find Me and Panic / Send-a-Friend remain disabled and unreachable"
+      - "The dialog states that mobile network triangulation details, GPS coordinates, and location photos are sent to our service for location resolution"
+      - "The dialog states that this data will not be stored"
+      - "The dialog provides call to actions to agree or decline"
+
+  - number: 2
+    id: "accept-consent-and-proceed-to-api-key-setup"
+    name: "User agrees to telemetry consent and sees optional API key setup"
+    given:
+      - "The mandatory first-run telemetry consent dialog is displayed"
+    when:
+      - "The user agrees to the consent terms"
+    then:
+      - "The consent dialog closes and consentGranted = true is persisted securely"
+      - "The user is presented with optional first-run API key configuration for Gemini and what3words"
+      - "The user can enter their own API keys or skip to proceed into the application"
+
+  - number: 3
+    id: "decline-consent-blocks-application"
+    name: "User declines telemetry consent and application will not run"
+    type: "negative"
+    given:
+      - "The mandatory first-run telemetry consent dialog is displayed"
+    when:
+      - "The user declines or dismisses without agreeing"
+    then:
+      - "The application refuses to run and exits or blocks all access"
+      - "No telemetry, GPS, SMS, or photo data is transmitted"
+
+  - number: 4
+    id: "skip-optional-api-keys-uses-defaults"
+    name: "User skips optional API keys on first run"
+    given:
+      - "The user has agreed to the mandatory telemetry consent"
+      - "The optional API key configuration screen is displayed"
+    when:
+      - "The user skips without entering a Gemini API key or a what3words API key"
+    then:
+      - "The application runs normally"
+      - "Gemini location resolution uses the built-in free-tier limit"
+      - "The what3words three-word designation feature is disabled and unavailable"
+
+  - number: 5
+    id: "configure-optional-api-keys"
+    name: "User supplies own Gemini and/or what3words API keys"
+    given:
+      - "The user has agreed to the mandatory telemetry consent"
+      - "The optional API key configuration screen is displayed"
+    when:
+      - "The user enables and enters a custom Gemini API key and/or what3words API key and saves"
+    then:
+      - "The supplied keys are stored securely on the device via DataStore + Tink AEAD"
+      - "Gemini calls use the user's custom API key quota instead of the free-tier limit"
+      - "The what3words three-word designation feature is enabled when a what3words key is provided"
+
+implementation_expectations:
+  consent_gate:
+    persistence: "Stored locally via SecurePreferencesStore interface (backed by Jetpack Preferences DataStore + Google Tink AEAD) once accepted"
+    enforcement: "Checked on startup via ViewModel before rendering main navigation/map UI, enabling Panic controls, or initializing telemetry services"
+    non_dismissible: "Back button (BackHandler) or outside tap must not bypass consent; declining exits the activity/process cleanly"
+    zero_server_storage: "Edge service processes telemetry and image payload ephemerally in memory and must not persist raw photos, GPS coordinates, or cell triangulation records"
+  byok_configuration:
+    settings_access: "Also accessible post-onboarding in app settings to add, update, or clear keys"
+    gemini_api_key:
+      optional: true
+      fallback_when_omitted: "Uses default application free-tier quota"
+      header_or_transport: "Forwarded per-request via X-Gemini-Api-Key header when configured so the user's own quota applies"
+    what3words_api_key:
+      optional: true
+      fallback_when_omitted: "Feature disabled; no what3words lookup attempted and no 3-word label shown in UI"
+      resolution_mode: "Best-effort when enabled; invalid key or lookup failure degrades gracefully without failing map update"
+  security_and_storage:
+    local_storage: "API keys and consent flag encrypted at rest using Jetpack Preferences DataStore (1.3.0) + Google Tink (tink-android AEAD AES256_GCM via AndroidKeysetManager backed by Android Keystore). Do NOT use deprecated EncryptedSharedPreferences."
+    backup_and_corruption_safety: "Exclude encrypted DataStore and Tink keyset prefs in backup_rules.xml and data_extraction_rules.xml; catch AEADBadTagException / GeneralSecurityException on cold start by wiping corrupted storage and re-triggering consent."
+    dependency_inversion: "Define SecurePreferencesStore Kotlin interface + in-memory fake first so domain/ViewModel and UI tests remain independent of Android Keystore."
+    no_hardcoded_user_keys: "Client binary contains no user-specific keys"
