@@ -2,8 +2,8 @@ okf_version: "0.1"
 type: "requirement"
 id: "first-run-consent-and-api-keys"
 project: "mayaGuideme"
-status: "approved"
-updated_at: "2026-11-24T22:35:00Z"
+status: "in-progress"
+updated_at: "2026-11-25T00:46:00Z"
 
 feature:
   name: "First-run telemetry consent and optional BYOK API keys"
@@ -22,6 +22,8 @@ scenarios:
   - number: 1
     id: "shows-mandatory-telemetry-consent-dialog"
     name: "Shows mandatory telemetry consent dialog on first run"
+    status: "done"
+    completed_at: "2026-11-25"
     given:
       - "The user launches the application for the first time"
       - "Telemetry consent has not yet been granted"
@@ -37,6 +39,8 @@ scenarios:
   - number: 2
     id: "accept-consent-and-proceed-to-api-key-setup"
     name: "User agrees to telemetry consent and sees optional API key setup"
+    status: "done"
+    completed_at: "2026-11-25"
     given:
       - "The mandatory first-run telemetry consent dialog is displayed"
     when:
@@ -50,6 +54,8 @@ scenarios:
     id: "decline-consent-blocks-application"
     name: "User declines telemetry consent and application will not run"
     type: "negative"
+    status: "done"
+    completed_at: "2026-11-25"
     given:
       - "The mandatory first-run telemetry consent dialog is displayed"
     when:
@@ -61,47 +67,86 @@ scenarios:
   - number: 4
     id: "skip-optional-api-keys-uses-defaults"
     name: "User skips optional API keys on first run"
+    status: "partial"
+    notes: "2026-11-25: DONE — onboarding skip flow and null key defaults verified on device. PENDING (Iteration 2) — edge free-tier Gemini call and what3words UI suppression."
     given:
       - "The user has agreed to the mandatory telemetry consent"
       - "The optional API key configuration screen is displayed"
     when:
       - "The user skips without entering a Gemini API key or a what3words API key"
     then:
-      - "The application runs normally"
-      - "Gemini location resolution uses the built-in free-tier limit"
-      - "The what3words three-word designation feature is disabled and unavailable"
+      - "The application runs normally" # done 2026-11-25
+      - "Gemini location resolution uses the built-in free-tier limit" # pending Iteration 2
+      - "The what3words three-word designation feature is disabled and unavailable" # pending Iteration 2
 
   - number: 5
     id: "configure-optional-api-keys"
     name: "User supplies own Gemini and/or what3words API keys"
+    status: "partial"
+    notes: "2026-11-25: DONE — ByokApiKeysDialog capture and DataStore + Tink AEAD encrypted persistence. PENDING (Iteration 2) — custom Gemini header forwarding and what3words lookup enablement."
     given:
       - "The user has agreed to the mandatory telemetry consent"
       - "The optional API key configuration screen is displayed"
     when:
       - "The user enables and enters a custom Gemini API key and/or what3words API key and saves"
     then:
-      - "The supplied keys are stored securely on the device via DataStore + Tink AEAD"
-      - "Gemini calls use the user's custom API key quota instead of the free-tier limit"
-      - "The what3words three-word designation feature is enabled when a what3words key is provided"
+      - "The supplied keys are stored securely on the device via DataStore + Tink AEAD" # done 2026-11-25
+      - "Gemini calls use the user's custom API key quota instead of the free-tier limit" # pending Iteration 2
+      - "The what3words three-word designation feature is enabled when a what3words key is provided" # pending Iteration 2
 
 implementation_expectations:
   consent_gate:
-    persistence: "Stored locally via SecurePreferencesStore interface (backed by Jetpack Preferences DataStore + Google Tink AEAD) once accepted"
-    enforcement: "Checked on startup via ViewModel before rendering main navigation/map UI, enabling Panic controls, or initializing telemetry services"
-    non_dismissible: "Back button (BackHandler) or outside tap must not bypass consent; declining exits the activity/process cleanly"
-    zero_server_storage: "Edge service processes telemetry and image payload ephemerally in memory and must not persist raw photos, GPS coordinates, or cell triangulation records"
+    persistence:
+      spec: "Stored locally via SecurePreferencesStore interface (backed by Jetpack Preferences DataStore + Google Tink AEAD) once accepted"
+      status: "done"
+      completed_at: "2026-11-25"
+    enforcement:
+      spec: "Checked on startup via ViewModel before rendering main navigation/map UI, enabling Panic controls, or initializing telemetry services"
+      status: "done"
+      completed_at: "2026-11-25"
+    non_dismissible:
+      spec: "Back button (BackHandler) or outside tap must not bypass consent; declining exits the activity/process cleanly"
+      status: "done"
+      completed_at: "2026-11-25"
+    zero_server_storage:
+      spec: "Edge service processes telemetry and image payload ephemerally in memory and must not persist raw photos, GPS coordinates, or cell triangulation records"
+      status: "pending"
+      notes: "Cloud Run edge service scope (Iteration 2+)"
+
   byok_configuration:
-    settings_access: "Also accessible post-onboarding in app settings to add, update, or clear keys"
+    settings_access:
+      spec: "Also accessible post-onboarding in app settings to add, update, or clear keys"
+      status: "pending"
+      notes: "ByokApiKeysDialog accepts initial values for reuse; Settings screen entry point not built yet"
     gemini_api_key:
       optional: true
+      storage_status: "done"
+      storage_completed_at: "2026-11-25"
+      transport_status: "pending"
       fallback_when_omitted: "Uses default application free-tier quota"
       header_or_transport: "Forwarded per-request via X-Gemini-Api-Key header when configured so the user's own quota applies"
     what3words_api_key:
       optional: true
+      storage_status: "done"
+      storage_completed_at: "2026-11-25"
+      runtime_status: "pending"
       fallback_when_omitted: "Feature disabled; no what3words lookup attempted and no 3-word label shown in UI"
       resolution_mode: "Best-effort when enabled; invalid key or lookup failure degrades gracefully without failing map update"
+
   security_and_storage:
-    local_storage: "API keys and consent flag encrypted at rest using Jetpack Preferences DataStore (1.3.0) + Google Tink (tink-android AEAD AES256_GCM via AndroidKeysetManager backed by Android Keystore). Do NOT use deprecated EncryptedSharedPreferences."
-    backup_and_corruption_safety: "Exclude encrypted DataStore and Tink keyset prefs in backup_rules.xml and data_extraction_rules.xml; catch AEADBadTagException / GeneralSecurityException on cold start by wiping corrupted storage and re-triggering consent."
-    dependency_inversion: "Define SecurePreferencesStore Kotlin interface + in-memory fake first so domain/ViewModel and UI tests remain independent of Android Keystore."
-    no_hardcoded_user_keys: "Client binary contains no user-specific keys"
+    local_storage:
+      spec: "API keys and consent flag encrypted at rest using Jetpack Preferences DataStore (1.3.0) + Google Tink (tink-android AEAD AES256_GCM via AndroidKeysetManager backed by Android Keystore). Do NOT use deprecated EncryptedSharedPreferences."
+      status: "done"
+      completed_at: "2026-11-25"
+    backup_and_corruption_safety:
+      spec: "Exclude encrypted DataStore and Tink keyset prefs in backup_rules.xml and data_extraction_rules.xml; catch AEADBadTagException / GeneralSecurityException on cold start by wiping corrupted storage and re-triggering consent."
+      status: "done"
+      completed_at: "2026-11-25"
+    dependency_inversion:
+      spec: "Define SecurePreferencesStore Kotlin interface + in-memory fake first so domain/ViewModel and UI tests remain independent of Android Keystore."
+      status: "partial"
+      notes: "2026-11-25: DONE — SecurePreferencesStore interface and OnboardingViewModel constructor injection. PENDING — unit/UI test suite against in-memory fake."
+    no_hardcoded_user_keys:
+      spec: "Client binary contains no user-specific keys"
+      status: "done"
+      completed_at: "2026-11-25"
