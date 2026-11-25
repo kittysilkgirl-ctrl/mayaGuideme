@@ -1,0 +1,78 @@
+okf_version: "0.1"
+type: "non-functional-requirements"
+id: "project-non-functional-and-architecture"
+project: "mayaGuideme"
+status: "approved"
+updated_at: "2026-11-24T22:35:00Z"
+
+overview:
+  name: "Maya, guide me — Project-Level Non-Functional & Architectural Standards"
+  description: >
+    Cross-cutting non-functional requirements, UI/Compose architecture rules,
+    pinned OSMDroid map standard, brand colour palette contract, DataStore + Tink
+    Keystore security guarantees, Auto Backup exclusions, and self-healing
+    resilience standards that apply across every feature in mayaGuideme.
+
+architecture_and_compose_patterns:
+  pattern: "Clean Architecture + MVVM + Unidirectional Data Flow (UDF)"
+  ui_toolkit: "Jetpack Compose (Material 3) — zero legacy XML view layouts (except AndroidView host for OSMDroid MapView)"
+  state_management:
+    - "Single immutable Kotlin data class per screen/feature (e.g., LocationCaptureUiState) exposed via StateFlow<UiState> from ViewModel."
+    - "All user actions and hardware callbacks flow into ViewModel intent methods; Composables remain stateless and render strictly from collected StateFlow."
+    - "Transient dialogs and error prompts are represented explicitly in UiState and cleared deterministically on user acknowledgement ('OK')."
+  dependency_inversion:
+    - "Domain and ViewModel layers depend only on Kotlin interfaces for CameraX, FusedLocationProvider, TelephonyManager, SmsManager, Contact Picker, SecurePreferencesStore (DataStore + Tink), and the Edge API client."
+    - "Concrete Android/network adapters live in the data/platform layer so fake/mock implementations can be swapped cleanly in tests; MainActivity must never read raw storage or hardware APIs directly in production flows."
+  lifecycle_and_concurrency:
+    - "Structured concurrency using viewModelScope (and a committed application/foreground scope for non-cancelable panic SMS dispatch) with Dispatchers.Default for image high-pass/grayscale processing and Dispatchers.IO for network/DataStore/FileProvider I/O."
+    - "CameraX Preview and ImageCapture use cases bind strictly to LifecycleOwner and unbind automatically on pause/destroy; sequential rear-to-front panic captures must unbind the rear camera before binding the front camera."
+
+map_sdk_standard:
+  library: "OSMDroid (org.osmdroid:osmdroid-android:6.1.20)"
+  compose_integration: "Hosted inside Compose via AndroidView with explicit LifecycleEventObserver forwarding onResume(), onPause(), and onDetach()."
+  tile_configuration:
+    user_agent: "Set Configuration.getInstance().userAgentValue = context.packageName before MapView inflation (required by OpenStreetMap tile usage policy)."
+    tile_cache: "Configure osmdroidBasePath and osmdroidTileCache inside app-private cacheDir so zero external storage permissions are required."
+  marker_rendering: "Resolved location marker is a custom high-contrast Canvas 'X' overlay/drawable styled in Maya brand primary colour (#E91E63)."
+
+brand_colours_and_theming:
+  source_of_truth: "app/src/main/res/values/colors.xml bridged into Compose MaterialTheme"
+  palette:
+    maya_primary: "#E91E63"
+    maya_primary_variant: "#AD1457"
+    maya_secondary: "#FF80AB"
+    maya_background_dark: "#121212"
+    maya_surface_dark: "#1E1E1E"
+    maya_on_primary: "#FFFFFF"
+    maya_on_surface: "#F5F5F5"
+    maya_error: "#CF6679"
+  component_rules:
+    - "Loading spinner displayed during edge communication must use Maya brand primary/secondary colours from colors.xml."
+    - "Resolved location marker on the OSMDroid map renders as a crisp high-contrast Canvas 'X' styled in Maya brand primary colour."
+    - "Empty or null text readouts (street address, secondary what3words/coordinate slot before first fix) must not be composed as blank containers."
+
+security_and_privacy:
+  consent_gate: "Hard first-run consent block; zero telemetry, camera, SMS, or network calls (including Panic / Send-a-Friend) may execute before explicit consent_granted == true is persisted."
+  secret_storage:
+    stack: "Jetpack Preferences DataStore (androidx.datastore:datastore-preferences:1.3.0) + Google Tink (com.google.crypto.tink:tink-android AEAD AES256_GCM via AndroidKeysetManager backed by Android Keystore)."
+    deprecated_prohibition: "Do NOT add or use deprecated androidx.security:security-crypto (EncryptedSharedPreferences)."
+    stored_items: "Consent state, optional BYOK keys (Gemini API key, what3words API key), and configured emergency contact details."
+    auto_backup_exclusion: "Explicitly exclude the encrypted DataStore file and Tink keyset SharedPreferences in res/xml/backup_rules.xml and res/xml/data_extraction_rules.xml so device restores never trigger unrecoverable Keystore AEADBadTagException crashes."
+    corruption_recovery: "If Android Keystore decryption throws AEADBadTagException or GeneralSecurityException (e.g., after OS reset/backup drift), wipe corrupted ciphertext and Tink keyset cleanly and re-prompt first-run consent rather than crash-looping."
+  zero_server_persistence: "Neither the client nor the Cloud Run edge proxy persists captured photos, GPS coordinates, cellular tower scans, emergency contacts, or user API keys to disk or database."
+  ephemeral_attachment_sharing: "Panic alert photos shared with system email/WhatsApp/share-sheet intents must be served via androidx.core.content.FileProvider from app-private cacheDir with temporary FLAG_GRANT_READ_URI_PERMISSION grants and retained until the next cold app start (or explicit user clear) — NEVER deleted on ActivityResult return."
+  permissions_and_manifest_hygiene:
+    runtime_permissions: "Request only minimum permissions required at point of use (CAMERA, ACCESS_FINE_LOCATION, SEND_SMS for silent panic SMS); use zero-permission system Contact Picker flows rather than declaring READ_CONTACTS."
+    package_visibility_queries: "Declare Android 11+ (API 30+) <queries> block in AndroidManifest.xml for ACTION_SENDTO (mailto:), ACTION_SEND_MULTIPLE (image/*), and package com.whatsapp."
+  transport_security: "HTTPS/TLS 1.2+ only; BYOK keys transmitted exclusively via request headers (X-Gemini-Api-Key, X-What3Words-Api-Key) and never logged by HTTP interceptors or crash traces."
+
+reliability_and_self_heal:
+  ui_interaction_lock: "While a non-emergency edge location request is in flight, standard UI controls and gestures (including 'Find Me' and settings) are locked until completion or timeout; once consent_granted == true, the emergency Panic / Send-a-Friend trigger is explicitly EXEMPT and immediately preempts any in-flight location capture."
+  atomic_package_integrity: "Never dispatch partial location-update telemetry (missing image or missing/stale GPS) and never move the map marker on degraded or failed responses."
+  deterministic_error_recovery:
+    - "Any hardware, permission, timeout (5s GPS, 2s cell scan, 15s edge HTTP), or non-200 error cancels in-flight non-emergency work, hides the spinner, unlocks the UI, and clears any unconfirmed 100.dp square capture thumbnail."
+    - "CameraX session errors release and reinitialize the camera provider cleanly on the next user retry without requiring an app restart."
+
+performance_and_battery:
+  no_background_polling: "Continuous background GPS tracking and periodic cell polling are strictly prohibited; sensors activate only on launch capture, explicit 'Find Me' tap, or explicit post-consent Panic / Send-a-Friend press."
+  payload_budget: "Captured location-resolution frames are downscaled to max 768px single-channel grayscale JPEG (quality 85) on-device before base64 encoding to keep cellular uploads fast on weak mobile connections."

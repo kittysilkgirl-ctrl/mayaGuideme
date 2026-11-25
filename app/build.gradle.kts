@@ -70,4 +70,7 @@ dependencies {
 
     implementation("com.google.android.gms:play-services-location:21.4.0")
     implementation("com.squareup.okhttp3:okhttp:5.5.1")
+
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.tink.android)
 }

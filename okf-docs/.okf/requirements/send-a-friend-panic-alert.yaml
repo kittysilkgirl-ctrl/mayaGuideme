@@ -1,0 +1,140 @@
+okf_version: "0.1"
+type: "requirement"
+id: "send-a-friend-panic-alert"
+project: "mayaGuideme"
+status: "approved"
+updated_at: "2026-11-24T22:35:00Z"
+
+feature:
+  name: "Send-a-Friend / Panic Alert"
+  description: >
+    Single-action emergency dispatch (strictly gated behind mandatory first-run
+    consent) triggered by the user to collect fresh location telemetry (GPS,
+    optional cellular, best-effort street address, and three-word designation
+    or coordinate fallback) plus sequential rear and front camera photos,
+    immediately firing a silent non-cancelable multipart SMS via SmsManager
+    first, followed by sequential OS intent handoffs to the on-system email
+    client and WhatsApp (with system share-sheet fallback) using FileProvider
+    content URIs retained safely until next cold start.
+
+context:
+  application_state: "running"
+  role: "application user"
+
+scenarios:
+  - number: 1
+    id: "trigger-non-cancelable-panic-alert-sms-first"
+    name: "Pressing panic button after consent captures fresh telemetry and dual photos, sends silent multipart SMS first, then hands off email and WhatsApp"
+    given:
+      - "Mandatory first-run telemetry consent has been accepted and persisted (consent_granted == true)"
+      - "The user has configured trusted recipient contact(s) (SMS number, email address, and/or WhatsApp target) and granted required permissions (SEND_SMS, CAMERA, ACCESS_FINE_LOCATION)"
+    when:
+      - "The user presses the panic / send-a-friend button"
+    then:
+      - "Any in-flight non-emergency Find Me request or UI interaction lock is immediately preempted and cancelled"
+      - "The emergency capture and SMS dispatch pipeline becomes non-cancelable from the moment the button is pressed with zero confirmation prompts"
+      - "Fresh GPS telemetry (and available cell telemetry within timeout) is collected at button-press time"
+      - "SMS text alert (street address, ///word.word.word or lat/lon fallback, and map link) is split via divideMessage and dispatched silently first via SmsManager.sendMultipartTextMessage as soon as location telemetry is ready"
+      - "Rear camera captures a fresh photo first, immediately followed in the same action by front camera capturing a fresh photo (cleanly unbinding rear before binding front)"
+      - "Pre-populated on-system email client and WhatsApp (or system share-sheet fallback) intents containing location details and FileProvider content URIs for both photos are launched sequentially without one intent clobbering the other"
+
+  - number: 2
+    id: "front-camera-fallback-still-dispatches"
+    name: "Front camera unavailable or fails still ships rear photo and location data"
+    given:
+      - "The panic action is in progress and rear camera capture succeeded"
+    when:
+      - "Front camera capture fails or is unavailable on the device"
+    then:
+      - "The non-cancelable SMS dispatch still executes without aborting"
+      - "The available rear photo is attached via FileProvider in the email and WhatsApp/share-sheet intent handoffs"
+
+  - number: 3
+    id: "send-sms-permission-missing-graceful-fallback"
+    name: "SEND_SMS permission not granted degrades safely without crashing"
+    type: "negative"
+    given:
+      - "The user presses the panic button without android.permission.SEND_SMS granted"
+    when:
+      - "The emergency dispatch pipeline executes"
+    then:
+      - "The application does not crash with a SecurityException"
+      - "Telemetry and rear/front photo capture still run and hand off to configured email/WhatsApp/share-sheet intents (and optionally an ACTION_SENDTO smsto: intent fallback if SMS number is configured)"
+
+  - number: 4
+    id: "panic-blocked-before-consent"
+    name: "Panic control is strictly disabled until mandatory first-run consent is persisted"
+    type: "negative"
+    given:
+      - "The user has not yet accepted the mandatory first-run telemetry consent (consent_granted == false)"
+    when:
+      - "The application displays the first-run consent dialog"
+    then:
+      - "The Panic / Send-a-Friend control is hidden/disabled and non-functional"
+      - "Zero GPS, cellular, camera, or SMS operations can be triggered"
+
+  - number: 5
+    id: "panic-pressed-without-configured-contact"
+    name: "Pressing panic when no emergency contact is configured opens setup immediately"
+    type: "negative"
+    given:
+      - "Mandatory first-run telemetry consent is granted"
+      - "No SMS number, email address, or WhatsApp contact is saved in SecurePreferencesStore"
+    when:
+      - "The user presses the panic / send-a-friend button"
+    then:
+      - "The application immediately opens the Emergency Contact Settings dialog with a clear prompt to add a trusted contact rather than failing silently"
+
+implementation_expectations:
+  priority_and_preemption:
+    consent_required: true
+    blocked_until_consent: "Hard gate: Panic control is disabled/hidden and non-functional until consent_granted == true is persisted in SecurePreferencesStore."
+    unconfigured_contact_behavior: "If zero recipient channels are configured when pressed post-consent, immediately open the Emergency Contact Settings dialog with an urgent prompt rather than failing silently."
+    overrides_ui_interaction_lock: true
+    preempts_non_emergency_work: "Once consent_granted == true, pressing Panic immediately cancels any active Find Me capture or edge resolution coroutine so the panic button is never blocked."
+  required_permissions:
+    - "android.permission.SEND_SMS"
+    - "android.permission.ACCESS_FINE_LOCATION"
+    - "android.permission.CAMERA"
+  manifest_prerequisites:
+    queries_block: "Declare Android 11+ <queries> entries for ACTION_SENDTO (mailto:), ACTION_SEND_MULTIPLE (image/*), and package com.whatsapp."
+    file_provider: "Declare androidx.core.content.FileProvider with authorities '${applicationId}.fileprovider' and res/xml/file_paths.xml exposing app-private cache-path for panic photos."
+  dispatch_semantics:
+    non_cancelable_on_press: true
+    fresh_capture_at_press: "Captures fresh GPS fix, optional cellular snapshot, and fresh rear + front camera images at the moment the button is pressed; never reuses stale prior captures"
+    committed_sms_execution: "Once pressed (with consent granted and SMS recipient configured), telemetry collection and SmsManager dispatch run in an application/foreground-scoped coroutine to completion with zero interactive confirmation prompts or cancel buttons"
+    android_sandbox_boundary: >
+      On Android, only SmsManager (Channel 1) can transmit silently in the
+      background. On-system email clients (Channel 2) and WhatsApp / share sheet
+      (Channel 3) are interactive OS intent handoffs that Android's security
+      model requires the user to confirm via the target app's Send button. Do
+      not attempt unofficial background automation hacks or store user SMTP
+      credentials; preserve zero server persistence.
+  camera_sequence:
+    order: "rear_then_front_sequential_in_same_action"
+    lifecycle_rule: "Unbind DEFAULT_BACK_CAMERA ImageCapture cleanly before binding DEFAULT_FRONT_CAMERA to prevent CameraX hardware session locks"
+    front_camera_failure_policy: "Best-effort fallback: continue dispatch with rear photo and location telemetry if front camera fails"
+    attachment_storage:
+      location: "Write ephemeral panic photos to app-private cacheDir/panic_temp/ and expose strictly via androidx.core.content.FileProvider content:// URIs with Intent.FLAG_GRANT_READ_URI_PERMISSION."
+      purge_policy: "Retain FileProvider temp files until the next cold app start (swept during startup launch sequence) or explicit user clear. NEVER delete files inside the ActivityResult callback, as Gmail's background outbox and WhatsApp read content:// URIs asynchronously."
+  channel_priority_and_transport:
+    priority_order:
+      - "1. SMS (SmsManager — silent & non-cancelable): send concise text summary (street address, ///word.word.word or lat/lon fallback, coordinates/map link) immediately once location is resolved so low-bandwidth/low-signal recipients get position data without user interaction"
+      - "2. On-system email client (interactive OS intent handoff): once photos are ready and if email is configured, launch pre-populated ACTION_SEND_MULTIPLE intent with recipient (EXTRA_EMAIL), location summary, and FileProvider URIs for rear/front photos (no SMTP configuration required)"
+      - "3. WhatsApp with Share-Sheet Fallback (sequential interactive OS intent handoff): launched ONLY after the email handoff ActivityResult returns (or immediately if email is not configured) so intents never clobber each other."
+    sms_implementation_notes:
+      - "API 31+ (Android 12+): Obtain SmsManager via context.getSystemService(SmsManager::class.java) — do NOT use deprecated SmsManager.getDefault() on API 31+."
+      - "Dual-SIM safety: Query SubscriptionManager.getDefaultSmsSubscriptionId(); if valid (!= INVALID_SUBSCRIPTION_ID), call smsManager.createForSubscriptionId(subId). Never crash on dual-SIM or SIM-less devices."
+      - "API 26-30 fallback: Use SmsManager.getDefault()."
+      - "Multipart safety: Always split the alert text using smsManager.divideMessage(body) and transmit via smsManager.sendMultipartTextMessage(...) so long street addresses + map links never truncate or silently fail."
+    whatsapp_limitation_and_fallback: >
+      Standard Android intents cannot reliably guarantee both specific phone/contact
+      pre-targeting AND multiple FileProvider image attachments in WhatsApp. Do not
+      claim silent or guaranteed targeted dual-photo delivery. Attempt WhatsApp
+      package intent (com.whatsapp) where supported; if WhatsApp is unavailable or
+      cannot accept the targeted dual-photo intent, fall back cleanly to the Android
+      system share sheet (Intent.createChooser) with the FileProvider URIs and text
+      summary, and surface a non-blocking 'Photos ready in share sheet' status.
+  configuration_and_privacy:
+    recipients_source: "Configured in Emergency Contact Settings dialog and persisted locally via SecurePreferencesStore (Jetpack Preferences DataStore + Google Tink AEAD)"
+    zero_server_persistence: "No emergency contact details, photos, or location fixes are persisted on any server"

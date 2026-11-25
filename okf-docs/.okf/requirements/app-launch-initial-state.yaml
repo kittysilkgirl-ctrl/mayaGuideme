@@ -1,0 +1,98 @@
+okf_version: "0.1"
+type: "requirement"
+id: "app-launch-initial-state"
+project: "mayaGuideme"
+status: "approved"
+updated_at: "2026-11-24T22:35:00Z"
+
+feature:
+  name: "Initial application launch state and immediate camera capture prompt"
+  description: >
+    Define the screen state when the application launches (once first-run
+    consent has been satisfied): inspect local BYOK feature flags (what3words
+    and Gemini keys) immediately from Tink-encrypted DataStore, keep location
+    readout slots hidden whenever empty, display the neutral OSMDroid map
+    immediately, pop up the live camera capture frame automatically, and
+    display an on-screen prompt instructing the user to point the camera at
+    their surroundings and take a photo to establish their location.
+
+context:
+  application_state: "app-launched"
+  role: "application user"
+
+scenarios:
+  - number: 1
+    id: "show-map-and-auto-open-camera-on-launch"
+    name: "Display OSMDroid map, configure enabled location slots, and auto-open camera on launch"
+    given:
+      - "The user has accepted the mandatory telemetry consent"
+      - "Required camera and location permissions are granted"
+    when:
+      - "The application launches into the main screen"
+    then:
+      - "The application immediately checks local Tink-encrypted DataStore for optional BYOK keys (what3words and Gemini)"
+      - "The street address display is hidden while empty and shown only when a resolved street address is present"
+      - "The secondary location readout slot is hidden before the first resolution, and once resolved displays ///word.word.word when what3words is enabled or falls back to the resolved latitude and longitude"
+      - "The OSMDroid map view is displayed immediately in its neutral initial state"
+      - "The live camera capture frame pops up automatically without requiring the user to press 'Find Me' first"
+      - "An on-screen prompt instructs the user to point the camera at a nearby feature (such as a road sign or storefront) and take a photo"
+      - "A 'camera take picture' call to action is visible"
+
+  - number: 2
+    id: "permissions-not-granted-on-launch"
+    name: "Camera or location permissions missing when application launches"
+    type: "negative"
+    given:
+      - "The user has accepted the mandatory telemetry consent"
+      - "Required camera or location permissions have not yet been granted"
+    when:
+      - "The application launches into the main screen"
+    then:
+      - "The OSMDroid map view is displayed without an 'X' location marker"
+      - "The live camera capture frame does not open until permissions are granted"
+      - "A message saying 'you havent granted permission' is displayed and the 'Find Me' call to action remains available to retry"
+
+  - number: 3
+    id: "subsequent-repositioning-via-find-me"
+    name: "User re-triggers capture after initial launch photo"
+    given:
+      - "The user has already completed or dismissed the initial launch capture"
+      - "No edge request is currently in flight"
+    when:
+      - "The user presses the 'Find Me' call to action"
+    then:
+      - "The live camera capture frame opens again with the guidance prompt and 'camera take picture' call to action"
+
+implementation_expectations:
+  launch_sequence:
+    order:
+      - "1. Sweep and purge any leftover ephemeral panic-alert photos from app-private cacheDir from a prior process session."
+      - "2. Check mandatory telemetry consent flag via SecurePreferencesStore; if missing, block on non-dismissible first-run consent dialog (with Panic disabled)."
+      - "3. If first-run onboarding just completed, present optional BYOK API key setup (or skip)."
+      - "4. Read Tink-encrypted DataStore preferences immediately on launch to determine whether what3words and custom Gemini keys are enabled."
+      - "5. Render main screen with OSMDroid map view while keeping street address and secondary coordinate/what3words UI elements hidden until the first capture resolves."
+      - "6. Automatically trigger permission check and open the live camera capture frame with the on-screen instruction prompt."
+  initial_map_state:
+    map_sdk: "OSMDroid (org.osmdroid:osmdroid-android:6.1.20) via Compose AndroidView with app-private tile cache and packageName User-Agent"
+    background_gps_on_launch: false
+    initial_marker: "No Canvas 'X' marker is placed on the map until the first capture succeeds"
+    camera_position: "Default neutral map view until the first edge response returns resolved coordinates"
+  location_readout_slots:
+    visibility_rule: "If empty or null, the readout UI element is hidden (not rendered as a blank box or placeholder)"
+    street_address_display:
+      always_enabled: true
+      visibility: "Hidden on launch and whenever street_address is null/empty; shown only when non-empty"
+    secondary_coordinate_or_what3words_display:
+      primary_when_enabled: "Displays ///word.word.word when what3words BYOK is configured and edge service resolves a three-word address"
+      fallback_when_unavailable: "Displays the edge-resolved latitude and longitude (lat_lon_display) whenever what3words is disabled, unconfigured, or returns null"
+      visibility: "Hidden on launch until the first capture resolves; always shown after a successful resolution (either ///word.word.word or lat/lon)"
+  on_screen_prompt:
+    visibility: "Displayed alongside or overlaid cleanly above/below the live camera frame whenever the camera box is open"
+    guidance_intent: "Instructs the user to point their camera at an identifiable feature in front of them (e.g., street sign, building name) and tap to capture"
+    dismiss_condition: "Disappears together with the live camera frame once the picture is taken"
+  permissions_handling:
+    required_permissions:
+      - "android.permission.CAMERA"
+      - "android.permission.ACCESS_FINE_LOCATION"
+    denied_message: "you havent granted permission"
+    fallback_cta: "'Find Me' button remains enabled so the user can re-trigger permission request and camera frame"
