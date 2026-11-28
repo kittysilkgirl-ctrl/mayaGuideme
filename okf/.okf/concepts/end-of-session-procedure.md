@@ -1,3 +1,43 @@
+&nbsp;
+
+```sh
+cat << 'EOF' > okf/end-of-session-procedure.md
+---
+okf_version: "0.1"
+concept: "end-of-session-procedure"
+project: "mayaGuideme"
+priority: "critical"
+updated_at: "2026-11-28T03:59:00Z"
+---
+
+# End-of-Session Closeout Procedure (Mandatory)
+
+To prevent context drift and ensure seamless session handoffs, every AI/developer session MUST execute the following closeout steps before declaring a task complete.
+
+## 1. Verify Code & Build Hygiene
+- Ensure all newly added code compiles cleanly without warnings or errors.
+- Run relevant test suites (`pytest`, `npm test`, or module-specific checks) to confirm no regressions.
+- Confirm formatting complies with project standards.
+
+## 2. Update Requirement YAML Statuses
+- Check `okf/` requirement files for any tasks completed during the current session.
+- Update `status` fields (e.g., from `in_progress` or `pending` to `completed`).
+- Record any newly discovered edge cases or follow-up work under `notes` or `next_steps` in the corresponding YAML file.
+
+## 3. Refresh okf/index.md & .okf/manifest.json
+- Run the OKF index generator script or manually re-index to reflect updated metadata, modified dates, and task statuses.
+- Verify `.okf/manifest.json` correctly mirrors all files in `okf/` with valid file paths and hashes.
+
+## 4. Verify Google Drive Sync & Path Consistency
+- Ensure path consistency across `thinkpad-dev/mayaGuideme/src` and `thinkpad-dev/mayaGuideme/src/okf` so localized document links resolve correctly across environments.
+- Verify that newly generated files or exports are synced to the designated Google Drive project mirror.
+
+## 5. Commit & Push
+- Write a structured commit message detailing changes, impacted OKF requirement IDs, and session outcomes.
+- Push all local branches to the remote repository.
+EOF
+```
+
 **Verify Google Drive Sync & Path Consistency:** Confirm that Google Drive sync state is up to date and that folder/file paths remain consistent across *thinkpad-dev/mayaGuideme/src* and *thinkpad-dev/mayaGuideme/src/okf* before completing closeout.
 
 ---
