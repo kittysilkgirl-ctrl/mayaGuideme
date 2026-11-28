@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCaptureException
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
@@ -40,6 +41,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.mayaguideme.service.camera.CameraCaptureService
+import java.util.concurrent.ExecutionException
 import kotlinx.coroutines.launch
 import maya.core.storage.TinkDataStorePreferencesStore
 import maya.ui.onboarding.ByokApiKeysDialog
@@ -114,7 +116,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-//TODO:package maya.ui.onboarding disposable spike code
+
+// Prototype camera capture content prior to ViewModel state hoisting
 @Composable
 private fun MainCameraContent(activity: ComponentActivity) {
     val scope = rememberCoroutineScope()
@@ -139,6 +142,55 @@ private fun MainCameraContent(activity: ComponentActivity) {
         if (!granted) statusMessage = "Camera permission denied"
     }
 
+    BindCameraEffect(
+        activity = activity,
+        hasCameraPermission = hasCameraPermission,
+        cameraService = cameraService,
+        onBound = {
+            isCameraBound = true
+            statusMessage = null
+        },
+        onError = { message ->
+            statusMessage = message
+        }
+    )
+
+    CameraCaptureOverlay(
+        statusMessage = statusMessage,
+        capturedBitmap = capturedBitmap,
+        onCaptureClick = {
+            if (!hasCameraPermission) {
+                permissionLauncher.launch(Manifest.permission.CAMERA)
+            } else if (isCameraBound) {
+                scope.launch {
+                    try {
+                        val frame = cameraService.captureRawFrame()
+                        capturedBitmap = frame.bitmap
+                        statusMessage = null
+                    } catch (e: ImageCaptureException) {
+                        Log.e("MainActivity", "Capture failed", e)
+                        statusMessage = "Capture failed: ${e.message}"
+                    } catch (e: IllegalArgumentException) {
+                        Log.e("MainActivity", "Capture failed", e)
+                        statusMessage = "Capture failed: ${e.message}"
+                    } catch (e: IllegalStateException) {
+                        Log.e("MainActivity", "Capture failed", e)
+                        statusMessage = "Capture failed: ${e.message}"
+                    }
+                }
+            }
+        }
+    )
+}
+
+@Composable
+private fun BindCameraEffect(
+    activity: ComponentActivity,
+    hasCameraPermission: Boolean,
+    cameraService: CameraCaptureService,
+    onBound: () -> Unit,
+    onError: (String) -> Unit
+) {
     LaunchedEffect(hasCameraPermission) {
         if (!hasCameraPermission) return@LaunchedEffect
         val providerFuture = ProcessCameraProvider.getInstance(activity)
@@ -151,15 +203,30 @@ private fun MainCameraContent(activity: ComponentActivity) {
                     CameraSelector.DEFAULT_BACK_CAMERA,
                     cameraService.imageCapture
                 )
-                isCameraBound = true
-                statusMessage = null
-            } catch (e: Exception) {
+                onBound()
+            } catch (e: ExecutionException) {
                 Log.e("MainActivity", "Camera bind failed", e)
-                statusMessage = "Bind failed: ${e.message}"
+                onError("Bind failed: ${e.message}")
+            } catch (e: InterruptedException) {
+                Log.e("MainActivity", "Camera bind interrupted", e)
+                onError("Bind failed: ${e.message}")
+            } catch (e: IllegalStateException) {
+                Log.e("MainActivity", "Camera bind failed", e)
+                onError("Bind failed: ${e.message}")
+            } catch (e: IllegalArgumentException) {
+                Log.e("MainActivity", "Camera bind failed", e)
+                onError("Bind failed: ${e.message}")
             }
         }, ContextCompat.getMainExecutor(activity))
     }
+}
 
+@Composable
+private fun CameraCaptureOverlay(
+    statusMessage: String?,
+    capturedBitmap: Bitmap?,
+    onCaptureClick: () -> Unit
+) {
     Box(modifier = Modifier.fillMaxSize()) {
         statusMessage?.let { msg ->
             Text(
@@ -172,22 +239,7 @@ private fun MainCameraContent(activity: ComponentActivity) {
         }
 
         Button(
-            onClick = {
-                if (!hasCameraPermission) {
-                    permissionLauncher.launch(Manifest.permission.CAMERA)
-                } else if (isCameraBound) {
-                    scope.launch {
-                        try {
-                            val frame = cameraService.captureRawFrame()
-                            capturedBitmap = frame.bitmap
-                            statusMessage = null
-                        } catch (e: Exception) {
-                            Log.e("MainActivity", "Capture failed", e)
-                            statusMessage = "Capture failed: ${e.message}"
-                        }
-                    }
-                }
-            },
+            onClick = onCaptureClick,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 32.dp)
@@ -196,20 +248,31 @@ private fun MainCameraContent(activity: ComponentActivity) {
         }
 
         capturedBitmap?.let { bitmap ->
-            Card(
+            CapturedLandmarkPreviewCard(
+                bitmap = bitmap,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(16.dp)
-                    .size(width = 140.dp, height = 180.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-            ) {
-                Image(
-                    bitmap = bitmap.asImageBitmap(),
-                    contentDescription = "Captured landmark",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+                    .size(width = 140.dp, height = 180.dp)
+            )
         }
+    }
+}
+
+@Composable
+private fun CapturedLandmarkPreviewCard(
+    bitmap: Bitmap,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+    ) {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = "Captured landmark",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }

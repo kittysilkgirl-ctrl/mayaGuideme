@@ -45,9 +45,13 @@ class CameraCaptureService(
                             } else {
                                 uprightBitmap.recycle()
                             }
-                        } catch (t: Throwable) {
+                        } catch (e: IllegalArgumentException) {
                             if (continuation.isActive) {
-                                continuation.resumeWithException(t)
+                                continuation.resumeWithException(e)
+                            }
+                        } catch (e: IllegalStateException) {
+                            if (continuation.isActive) {
+                                continuation.resumeWithException(e)
                             }
                         } finally {
                             image.close()

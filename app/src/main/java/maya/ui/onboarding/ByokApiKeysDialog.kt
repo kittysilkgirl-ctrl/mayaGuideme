@@ -1,4 +1,5 @@
 package maya.ui.onboarding
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +23,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import maya.ui.base.FormFactorPreviews
 
@@ -38,75 +40,17 @@ fun ByokApiKeysDialog(
     var what3wordsKeyInput by rememberSaveable(initialWhat3wordsApiKey) {
         mutableStateOf(initialWhat3wordsApiKey.orEmpty())
     }
-    var showGeminiKey by rememberSaveable { mutableStateOf(false) }
-    var showWhat3wordsKey by rememberSaveable { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onSkip,
-        title = {
-            Text(text = "Optional API Keys")
-        },
+        title = { Text(text = "Optional API Keys") },
         text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "Both keys are optional and encrypted on your device. " +
-                            "Leave Gemini blank to use the built-in free tier, or leave " +
-                            "what3words blank to keep three-word addresses disabled."
-                )
-
-                OutlinedTextField(
-                    value = geminiKeyInput,
-                    onValueChange = { geminiKeyInput = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Gemini API Key (Optional)") },
-                    supportingText = { Text("Uses your own quota instead of the shared free limit") },
-                    singleLine = true,
-                    visualTransformation = if (showGeminiKey) {
-                        VisualTransformation.None
-                    } else {
-                        PasswordVisualTransformation()
-                    },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
-                        autoCorrectEnabled = false,
-                        imeAction = ImeAction.Next
-                    ),
-                    trailingIcon = {
-                        TextButton(onClick = { showGeminiKey = !showGeminiKey }) {
-                            Text(if (showGeminiKey) "Hide" else "Show")
-                        }
-                    }
-                )
-
-                OutlinedTextField(
-                    value = what3wordsKeyInput,
-                    onValueChange = { what3wordsKeyInput = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("what3words API Key (Optional)") },
-                    supportingText = { Text("Enables ///word.word.word display when configured") },
-                    singleLine = true,
-                    visualTransformation = if (showWhat3wordsKey) {
-                        VisualTransformation.None
-                    } else {
-                        PasswordVisualTransformation()
-                    },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
-                        autoCorrectEnabled = false,
-                        imeAction = ImeAction.Done
-                    ),
-                    trailingIcon = {
-                        TextButton(onClick = { showWhat3wordsKey = !showWhat3wordsKey }) {
-                            Text(if (showWhat3wordsKey) "Hide" else "Show")
-                        }
-                    }
-                )
-            }
+            ByokApiKeysFormContent(
+                geminiKeyInput = geminiKeyInput,
+                onGeminiKeyChange = { geminiKeyInput = it },
+                what3wordsKeyInput = what3wordsKeyInput,
+                onWhat3wordsKeyChange = { what3wordsKeyInput = it }
+            )
         },
         confirmButton = {
             Button(
@@ -128,6 +72,79 @@ fun ByokApiKeysDialog(
     )
 }
 
+@Composable
+private fun ByokApiKeysFormContent(
+    geminiKeyInput: String,
+    onGeminiKeyChange: (String) -> Unit,
+    what3wordsKeyInput: String,
+    onWhat3wordsKeyChange: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = "Both keys are optional and encrypted on your device. " +
+                "Leave Gemini blank to use the built-in free tier, or leave " +
+                "what3words blank to keep three-word addresses disabled."
+        )
+
+        ApiKeyInputField(
+            value = geminiKeyInput,
+            onValueChange = onGeminiKeyChange,
+            label = "Gemini API Key (Optional)",
+            supportingText = "Uses your own quota instead of the shared free limit",
+            imeAction = ImeAction.Next
+        )
+
+        ApiKeyInputField(
+            value = what3wordsKeyInput,
+            onValueChange = onWhat3wordsKeyChange,
+            label = "what3words API Key (Optional)",
+            supportingText = "Enables ///word.word.word display when configured",
+            imeAction = ImeAction.Done
+        )
+    }
+}
+
+@Composable
+private fun ApiKeyInputField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    supportingText: String,
+    imeAction: ImeAction
+) {
+    var isKeyVisible by rememberSaveable { mutableStateOf(false) }
+
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text(label) },
+        supportingText = { Text(supportingText) },
+        singleLine = true,
+        visualTransformation = if (isKeyVisible) {
+            VisualTransformation.None
+        } else {
+            PasswordVisualTransformation()
+        },
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Password,
+            autoCorrectEnabled = false,
+            imeAction = imeAction
+        ),
+        trailingIcon = {
+            TextButton(onClick = { isKeyVisible = !isKeyVisible }) {
+                Text(if (isKeyVisible) "Hide" else "Show")
+            }
+        }
+    )
+}
+
+@Preview
 @FormFactorPreviews
 @Composable
 private fun ByokApiKeysDialogPreview() {
@@ -142,4 +159,3 @@ private fun ByokApiKeysDialogPreview() {
         }
     }
 }
-
